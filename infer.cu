@@ -93,18 +93,118 @@ std::vector<float> read_param(const std::string &path) {
     return params;
 }
 
-__global__ void Conv_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias, int input_height, int kernel_height, int output_height, int input_channel, int output_channel) {
-    float value = 0;
-    for (int z = 0; z < input_channel; z++) {
-        for (int i = 0; i < kernel_height; i++) {
-            for (int j = 0; j < kernel_height; j++) {
-                value += input_image[blockIdx.y * input_channel * input_height * input_height + z * input_height * input_height + OFFSET(threadIdx.y + i, threadIdx.x + j, input_height)] * kernel_weights[blockIdx.x * input_channel * kernel_height * kernel_height + z * kernel_height * kernel_height + OFFSET(i, j, kernel_height)];
+__global__ void Conv1_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
+    __shared__ float input_image_shared[28][28];
+    __shared__ float kernel_weights_shared[6][5][5];
+    __shared__ float kernel_bias_shared[6];
+
+    for (int i = 0; i < 3; i++) {
+        int pos = (threadIdx.y * 8 + threadIdx.x) * 4 + i * 256;
+        float4 image_data = ((float4 *)(input_image + blockIdx.x * 28 * 28 + pos))[0];
+        input_image_shared[pos / 28][pos % 28] = image_data.x;
+        input_image_shared[(pos + 1) / 28][(pos + 1) % 28] = image_data.y;
+        input_image_shared[(pos + 2) / 28][(pos + 2) % 28] = image_data.z;
+        input_image_shared[(pos + 3) / 28][(pos + 3) % 28] = image_data.w;
+    }
+    if (threadIdx.y == 0 && threadIdx.x < 4) {
+        int pos = threadIdx.x * 4 + 3 * 256;
+        float4 image_data = ((float4 *)(input_image + blockIdx.x * 28 * 28 + pos))[0];
+        input_image_shared[pos / 28][pos % 28] = image_data.x;
+        input_image_shared[(pos + 1) / 28][(pos + 1) % 28] = image_data.y;
+        input_image_shared[(pos + 2) / 28][(pos + 2) % 28] = image_data.z;
+        input_image_shared[(pos + 3) / 28][(pos + 3) % 28] = image_data.w;
+    }
+    if (threadIdx.y * 8 + threadIdx.x < 37) {
+        int pos = (threadIdx.y * 8 + threadIdx.x) * 4;
+        float4 kernel_data = ((float4 *)(kernel_weights + pos))[0];
+        kernel_weights_shared[pos / 25][pos % 25 / 5][pos % 25 % 5] = kernel_data.x;
+        kernel_weights_shared[(pos + 1) / 25][(pos + 1) % 25 / 5][(pos + 1) % 25 % 5] = kernel_data.y;
+        kernel_weights_shared[(pos + 2) / 25][(pos + 2) % 25 / 5][(pos + 2) % 25 % 5] = kernel_data.z;
+        kernel_weights_shared[(pos + 3) / 25][(pos + 3) % 25 / 5][(pos + 3) % 25 % 5] = kernel_data.w;
+    }
+    if (threadIdx.y == 0 && threadIdx.x == 0) {
+        int pos = 37 * 4;
+        float2 kernel_data = ((float2 *)(kernel_weights + pos))[0];
+        kernel_weights_shared[pos / 25][pos % 25 / 5][pos % 25 % 5] = kernel_data.x;
+        kernel_weights_shared[(pos + 1) / 25][(pos + 1) % 25 / 5][(pos + 1) % 25 % 5] = kernel_data.y;
+    }
+    if (threadIdx.y == 0 && threadIdx.x < 6) {
+        kernel_bias_shared[threadIdx.x] = kernel_bias[threadIdx.x];
+    }
+    __syncthreads();
+
+    for (int ii = 0; ii < 3; ii++) {
+        for (int jj = 0; jj < 3; jj++) {
+            for (int o = 0; o < 6; o++) {
+                float value = 0;
+                for (int i = 0; i < 5; i++) {
+                    for (int j = 0; j < 5; j++) {
+                        value += input_image_shared[threadIdx.y * 3 + ii + i][threadIdx.x * 3 + jj + j] * kernel_weights_shared[o][i][j];
+                    }
+                }
+                value += kernel_bias_shared[o];
+                value = value > 0 ? value : 0;
+                output_image[blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.y * 3 + ii, threadIdx.x * 3 + jj, 24)] = value;
             }
         }
     }
-    value += kernel_bias[blockIdx.x];
-    value = value > 0 ? value : 0;
-    output_image[blockIdx.y * output_channel * output_height * output_height + blockIdx.x * output_height * output_height + OFFSET(threadIdx.y, threadIdx.x, output_height)] = value;
+}
+
+__global__ void Conv2_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
+    __shared__ float input_image_shared[6][12][12];
+    __shared__ float kernel_weights_shared[16][6][5][5];
+    __shared__ float kernel_bias_shared[16];
+
+    for (int i = 0; i < 3; i++) {
+        int pos = (threadIdx.y * 8 + threadIdx.x) * 4 + i * 256;
+        float4 image_data = ((float4 *)(input_image + blockIdx.x * 6 * 12 * 12 + pos))[0];
+        input_image_shared[pos / 144][pos % 144 / 12][pos % 144 % 12] = image_data.x;
+        input_image_shared[(pos + 1) / 144][(pos + 1) % 144 / 12][(pos + 1) % 144 % 12] = image_data.y;
+        input_image_shared[(pos + 2) / 144][(pos + 2) % 144 / 12][(pos + 2) % 144 % 12] = image_data.z;
+        input_image_shared[(pos + 3) / 144][(pos + 3) % 144 / 12][(pos + 3) % 144 % 12] = image_data.w;
+    }
+    if (threadIdx.y * 8 + threadIdx.x < 24) {
+        int pos = (threadIdx.y * 8 + threadIdx.x) * 4 + 3 * 256;
+        float4 image_data = ((float4 *)(input_image + blockIdx.x * 6 * 12 * 12 + pos))[0];
+        input_image_shared[pos / 144][pos % 144 / 12][pos % 144 % 12] = image_data.x;
+        input_image_shared[(pos + 1) / 144][(pos + 1) % 144 / 12][(pos + 1) % 144 % 12] = image_data.y;
+        input_image_shared[(pos + 2) / 144][(pos + 2) % 144 / 12][(pos + 2) % 144 % 12] = image_data.z;
+        input_image_shared[(pos + 3) / 144][(pos + 3) % 144 / 12][(pos + 3) % 144 % 12] = image_data.w;
+    }
+    for (int i = 0; i < 9; i++) {
+        int pos = (threadIdx.y * 8 + threadIdx.x) * 4 + i * 256;
+        float4 kernel_data = ((float4 *)(kernel_weights + pos))[0];
+        kernel_weights_shared[pos / 150][pos % 150 / 25][pos % 150 % 25 / 5][pos % 150 % 25 % 5] = kernel_data.x;
+        kernel_weights_shared[(pos + 1) / 150][(pos + 1) % 150 / 25][(pos + 1) % 150 % 25 / 5][(pos + 1) % 150 % 25 % 5] = kernel_data.y;
+        kernel_weights_shared[(pos + 2) / 150][(pos + 2) % 150 / 25][(pos + 2) % 150 % 25 / 5][(pos + 2) % 150 % 25 % 5] = kernel_data.z;
+        kernel_weights_shared[(pos + 3) / 150][(pos + 3) % 150 / 25][(pos + 3) % 150 % 25 / 5][(pos + 3) % 150 % 25 % 5] = kernel_data.w;
+    }
+    if (threadIdx.y * 8 + threadIdx.x < 24) {
+        int pos = (threadIdx.y * 8 + threadIdx.x) * 4 + 9 * 256;
+        float4 kernel_data = ((float4 *)(kernel_weights + pos))[0];
+        kernel_weights_shared[pos / 150][pos % 150 / 25][pos % 150 % 25 / 5][pos % 150 % 25 % 5] = kernel_data.x;
+        kernel_weights_shared[(pos + 1) / 150][(pos + 1) % 150 / 25][(pos + 1) % 150 % 25 / 5][(pos + 1) % 150 % 25 % 5] = kernel_data.y;
+        kernel_weights_shared[(pos + 2) / 150][(pos + 2) % 150 / 25][(pos + 2) % 150 % 25 / 5][(pos + 2) % 150 % 25 % 5] = kernel_data.z;
+        kernel_weights_shared[(pos + 3) / 150][(pos + 3) % 150 / 25][(pos + 3) % 150 % 25 / 5][(pos + 3) % 150 % 25 % 5] = kernel_data.w;
+    }
+    if (threadIdx.y * blockDim.x + threadIdx.x < 16) {
+        kernel_bias_shared[threadIdx.y * blockDim.x + threadIdx.x] = kernel_bias[threadIdx.y * blockDim.x + threadIdx.x];
+    }
+    __syncthreads();
+
+    for (int o = 0; o < 16; o++) {
+        float value = 0;
+        for (int z = 0; z < 6; z++) {
+            for (int i = 0; i < 5; i++) {
+                for (int j = 0; j < 5; j++) {
+                    value += input_image_shared[z][threadIdx.y + i][threadIdx.x + j] * kernel_weights_shared[o][z][i][j];
+                }
+            }
+        }
+        value += kernel_bias_shared[o];
+        value = value > 0 ? value : 0;
+        output_image[blockIdx.x * 16 * 8 * 8 + o * 8 * 8 + OFFSET(threadIdx.y, threadIdx.x, 8)] = value;
+    }
 }
 
 __global__ void MaxPool(float *input_image, float *output_image, int input_height, int output_height, int channel) {
@@ -162,8 +262,8 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMalloc((void **)&device_Conv1_kernel_bias, Conv1_output_channel * sizeof(float)));
     CHECK(cudaMemcpy(device_Conv1_kernel_weight, &Conv1_weight[0], Conv1_output_channel * Conv1_input_channel * Conv1_kernel_height * Conv1_kernel_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Conv1_kernel_bias, &Conv1_bias[0], Conv1_output_channel * sizeof(float), cudaMemcpyHostToDevice));
-    dim3 Conv1_blocksperGrid(Conv1_output_channel, batchsize);
-    dim3 Conv1_threadsperBlock(Conv1_output_height, Conv1_output_height);
+    dim3 Conv1_blocksperGrid(batchsize);
+    dim3 Conv1_threadsperBlock(8, 8);
 
     // MaxPool1 [6, 24, 24] -> [6, 12, 12]
     const int MaxPool1_input_height = Conv1_output_height;
@@ -188,8 +288,8 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMalloc((void **)&device_Conv2_kernel_bias, Conv2_output_channel * sizeof(float)));
     CHECK(cudaMemcpy(device_Conv2_kernel_weight, &Conv2_weight[0], Conv2_output_channel * Conv2_input_channel * Conv2_kernel_height * Conv2_kernel_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Conv2_kernel_bias, &Conv2_bias[0], Conv2_output_channel * sizeof(float), cudaMemcpyHostToDevice));
-    dim3 Conv2_blocksperGrid(Conv2_output_channel, batchsize);
-    dim3 Conv2_threadsperBlock(Conv2_output_height, Conv2_output_height);
+    dim3 Conv2_blocksperGrid(batchsize);
+    dim3 Conv2_threadsperBlock(8, 8);
 
     // MaxPool2 [16, 8, 8] -> [16, 4, 4]
     const int MaxPool2_input_height = Conv2_output_height;
@@ -249,7 +349,7 @@ int main(int argc, char *argv[]) {
 
     CHECK(cudaMemcpy(device_input_image, images, batchsize * Conv1_input_height * Conv1_input_height * sizeof(float), cudaMemcpyHostToDevice));
     // Conv1
-    Conv_ReLu<<<Conv1_blocksperGrid, Conv1_threadsperBlock>>>(device_input_image, device_Conv1_output_image, device_Conv1_kernel_weight, device_Conv1_kernel_bias, Conv1_input_height, Conv1_kernel_height, Conv1_output_height, Conv1_input_channel, Conv1_output_channel);
+    Conv1_ReLu<<<Conv1_blocksperGrid, Conv1_threadsperBlock>>>(device_input_image, device_Conv1_output_image, device_Conv1_kernel_weight, device_Conv1_kernel_bias);
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
     // MaxPool1
@@ -257,7 +357,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
     // Conv2
-    Conv_ReLu<<<Conv2_blocksperGrid, Conv2_threadsperBlock>>>(device_MaxPool1_output_image, device_Conv2_output_image, device_Conv2_kernel_weight, device_Conv2_kernel_bias, Conv2_input_height, Conv2_kernel_height, Conv2_output_height, Conv2_input_channel, Conv2_output_channel);
+    Conv2_ReLu<<<Conv2_blocksperGrid, Conv2_threadsperBlock>>>(device_MaxPool1_output_image, device_Conv2_output_image, device_Conv2_kernel_weight, device_Conv2_kernel_bias);
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
     // MaxPool2
