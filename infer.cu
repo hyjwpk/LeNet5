@@ -220,14 +220,124 @@ __global__ void MaxPool(float *input_image, float *output_image, int input_heigh
     output_image[blockIdx.y * channel * output_height * output_height + blockIdx.x * output_height * output_height + threadIdx.y * output_height + threadIdx.x] = value;
 }
 
-__global__ void Linear_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias, int input_height, int output_height, bool ReLu) {
-    float value = 0;
-    for (int i = 0; i < input_height; i++) {
-        value += input_image[blockIdx.x * input_height + i] * kernel_weights[OFFSET(threadIdx.x, i, input_height)];
+template <unsigned int blockSize>
+__device__ __forceinline__ float warpReduceSum(float sum) {
+    if (blockSize >= 32)
+        sum += __shfl_down_sync(0xffffffff, sum, 16);
+    if (blockSize >= 16)
+        sum += __shfl_down_sync(0xffffffff, sum, 8);
+    if (blockSize >= 8)
+        sum += __shfl_down_sync(0xffffffff, sum, 4);
+    if (blockSize >= 4)
+        sum += __shfl_down_sync(0xffffffff, sum, 2);
+    if (blockSize >= 2)
+        sum += __shfl_down_sync(0xffffffff, sum, 1);
+    return sum;
+}
+
+__global__ void Linear1_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
+    for (int i = 0; i < 120; i += 2) {
+        float value = 0;
+        if (threadIdx.y < 4) {
+            float4 image_data0 = ((float4 *)(input_image + blockIdx.x * 256 + (threadIdx.y * 8 + threadIdx.x) * 8))[0];
+            float4 image_data1 = ((float4 *)(input_image + blockIdx.x * 256 + (threadIdx.y * 8 + threadIdx.x) * 8 + 4))[0];
+            float4 kernel_data0 = ((float4 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 8, 256)))[0];
+            float4 kernel_data1 = ((float4 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 8 + 4, 256)))[0];
+            value += image_data0.x * kernel_data0.x + image_data0.y * kernel_data0.y + image_data0.z * kernel_data0.z + image_data0.w * kernel_data0.w;
+            value += image_data1.x * kernel_data1.x + image_data1.y * kernel_data1.y + image_data1.z * kernel_data1.z + image_data1.w * kernel_data1.w;
+            value = warpReduceSum<32>(value);
+            if (threadIdx.y == 0 && threadIdx.x == 0) {
+                value += kernel_bias[i];
+                value = value > 0 ? value : 0;
+                output_image[blockIdx.x * 120 + i] = value;
+            }
+        } else {
+            float4 image_data0 = ((float4 *)(input_image + blockIdx.x * 256 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 8))[0];
+            float4 image_data1 = ((float4 *)(input_image + blockIdx.x * 256 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 8 + 4))[0];
+            float4 kernel_data0 = ((float4 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 8, 256)))[0];
+            float4 kernel_data1 = ((float4 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 8 + 4, 256)))[0];
+            value += image_data0.x * kernel_data0.x + image_data0.y * kernel_data0.y + image_data0.z * kernel_data0.z + image_data0.w * kernel_data0.w;
+            value += image_data1.x * kernel_data1.x + image_data1.y * kernel_data1.y + image_data1.z * kernel_data1.z + image_data1.w * kernel_data1.w;
+            value = warpReduceSum<32>(value);
+            if (threadIdx.y == 4 && threadIdx.x == 0) {
+                value += kernel_bias[i + 1];
+                value = value > 0 ? value : 0;
+                output_image[blockIdx.x * 120 + i + 1] = value;
+            }
+        }
     }
-    value += kernel_bias[threadIdx.x];
-    value = ((!ReLu) || (value > 0)) ? value : 0;
-    output_image[blockIdx.x * output_height + threadIdx.x] = value;
+}
+
+__global__ void Linear2_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
+    for (int i = 0; i < 84; i += 2) {
+        float value = 0;
+        if (threadIdx.y < 4) {
+            float2 image_data = ((float2 *)(input_image + blockIdx.x * 120 + (threadIdx.y * 8 + threadIdx.x) * 2))[0];
+            float2 kernel_data = ((float2 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 2, 120)))[0];
+            value += image_data.x * kernel_data.x + image_data.y * kernel_data.y;
+            if (threadIdx.y * 8 + threadIdx.x < 14) {
+                float4 image_data = ((float4 *)(input_image + blockIdx.x * 120 + (threadIdx.y * 8 + threadIdx.x) * 4 + 64))[0];
+                float4 kernel_data = ((float4 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 4 + 64, 120)))[0];
+                value += image_data.x * kernel_data.x + image_data.y * kernel_data.y + image_data.z * kernel_data.z + image_data.w * kernel_data.w;
+            }
+            value = warpReduceSum<32>(value);
+            if (threadIdx.y == 0 && threadIdx.x == 0) {
+                value += kernel_bias[i];
+                value = value > 0 ? value : 0;
+                output_image[blockIdx.x * 84 + i] = value;
+            }
+        } else {
+            float2 image_data = ((float2 *)(input_image + blockIdx.x * 120 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 2))[0];
+            float2 kernel_data = ((float2 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 2, 120)))[0];
+            value += image_data.x * kernel_data.x + image_data.y * kernel_data.y;
+            if ((threadIdx.y - 4) * 8 + threadIdx.x < 14) {
+                float4 image_data = ((float4 *)(input_image + blockIdx.x * 120 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 4 + 64))[0];
+                float4 kernel_data = ((float4 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 4 + 64, 120)))[0];
+                value += image_data.x * kernel_data.x + image_data.y * kernel_data.y + image_data.z * kernel_data.z + image_data.w * kernel_data.w;
+            }
+            value = warpReduceSum<32>(value);
+            if (threadIdx.y - 4 == 0 && threadIdx.x == 0) {
+                value += kernel_bias[i + 1];
+                value = value > 0 ? value : 0;
+                output_image[blockIdx.x * 84 + i + 1] = value;
+            }
+        }
+    }
+}
+
+__global__ void Linear3_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
+    for (int i = 0; i < 10; i += 2) {
+        float value = 0;
+        if (threadIdx.y < 4) {
+            float2 image_data = ((float2 *)(input_image + blockIdx.x * 84 + (threadIdx.y * 8 + threadIdx.x) * 2))[0];
+            float2 kernel_data = ((float2 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 2, 84)))[0];
+            value += image_data.x * kernel_data.x + image_data.y * kernel_data.y;
+            if (threadIdx.y * 8 + threadIdx.x < 5) {
+                float4 image_data = ((float4 *)(input_image + blockIdx.x * 84 + (threadIdx.y * 8 + threadIdx.x) * 4 + 64))[0];
+                float4 kernel_data = ((float4 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 4 + 64, 84)))[0];
+                value += image_data.x * kernel_data.x + image_data.y * kernel_data.y + image_data.z * kernel_data.z + image_data.w * kernel_data.w;
+            }
+            value = warpReduceSum<32>(value);
+            if (threadIdx.y == 0 && threadIdx.x == 0) {
+                value += kernel_bias[i];
+                output_image[blockIdx.x * 10 + i] = value;
+            }
+        } else {
+            float2 image_data = ((float2 *)(input_image + blockIdx.x * 84 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 2))[0];
+            float2 kernel_data = ((float2 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 2, 84)))[0];
+            value += image_data.x * kernel_data.x + image_data.y * kernel_data.y;
+            if ((threadIdx.y - 4) * 8 + threadIdx.x < 5) {
+                float4 image_data = ((float4 *)(input_image + blockIdx.x * 84 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 4 + 64))[0];
+                float4 kernel_data = ((float4 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 4 + 64, 84)))[0];
+                value += image_data.x * kernel_data.x + image_data.y * kernel_data.y + image_data.z * kernel_data.z + image_data.w * kernel_data.w;
+            }
+            value = warpReduceSum<32>(value);
+            if (threadIdx.y - 4 == 0 && threadIdx.x == 0) {
+                value += kernel_bias[i + 1];
+                output_image[blockIdx.x * 10 + i + 1] = value;
+            }
+        }
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -312,7 +422,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMemcpy(device_Linear1_kernel_weight, &Linear1_weight[0], Linear1_output_height * Linear1_input_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Linear1_kernel_bias, &Linear1_bias[0], Linear1_output_height * sizeof(float), cudaMemcpyHostToDevice));
     dim3 Linear1_blocksperGrid(batchsize);
-    dim3 Linear1_threadsperBlock(Linear1_output_height);
+    dim3 Linear1_threadsperBlock(8, 8);
 
     // Linear2 [120] -> [84]
     const int Linear2_input_height = Linear1_output_height;
@@ -326,7 +436,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMemcpy(device_Linear2_kernel_weight, &Linear2_weight[0], Linear2_output_height * Linear2_input_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Linear2_kernel_bias, &Linear2_bias[0], Linear2_output_height * sizeof(float), cudaMemcpyHostToDevice));
     dim3 Linear2_blocksperGrid(batchsize);
-    dim3 Linear2_threadsperBlock(Linear2_output_height);
+    dim3 Linear2_threadsperBlock(8, 8);
 
     // Linear3 [84] -> [10]
     const int Linear3_input_height = Linear2_output_height;
@@ -342,7 +452,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMemcpy(device_Linear3_kernel_bias, &Linear3_bias[0], Linear3_output_height * sizeof(float), cudaMemcpyHostToDevice));
     host_Linear3_output_image = (float *)malloc(batchsize * Linear3_output_height * sizeof(float));
     dim3 Linear3_blocksperGrid(batchsize);
-    dim3 Linear3_threadsperBlock(Linear3_output_height);
+    dim3 Linear3_threadsperBlock(8, 8);
 
     int correct_nums = 0;
     auto start = std::chrono::high_resolution_clock::now();
@@ -365,15 +475,15 @@ int main(int argc, char *argv[]) {
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
     // Linear1
-    Linear_ReLu<<<Linear1_blocksperGrid, Linear1_threadsperBlock>>>(device_MaxPool2_output_image, device_Linear1_output_image, device_Linear1_kernel_weight, device_Linear1_kernel_bias, Linear1_input_height, Linear1_output_height, true);
+    Linear1_ReLu<<<Linear1_blocksperGrid, Linear1_threadsperBlock>>>(device_MaxPool2_output_image, device_Linear1_output_image, device_Linear1_kernel_weight, device_Linear1_kernel_bias);
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
     // Linear2
-    Linear_ReLu<<<Linear2_blocksperGrid, Linear2_threadsperBlock>>>(device_Linear1_output_image, device_Linear2_output_image, device_Linear2_kernel_weight, device_Linear2_kernel_bias, Linear2_input_height, Linear2_output_height, true);
+    Linear2_ReLu<<<Linear2_blocksperGrid, Linear2_threadsperBlock>>>(device_Linear1_output_image, device_Linear2_output_image, device_Linear2_kernel_weight, device_Linear2_kernel_bias);
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
     // Linear3
-    Linear_ReLu<<<Linear3_blocksperGrid, Linear3_threadsperBlock>>>(device_Linear2_output_image, device_Linear3_output_image, device_Linear3_kernel_weight, device_Linear3_kernel_bias, Linear3_input_height, Linear3_output_height, false);
+    Linear3_ReLu<<<Linear3_blocksperGrid, Linear3_threadsperBlock>>>(device_Linear2_output_image, device_Linear3_output_image, device_Linear3_kernel_weight, device_Linear3_kernel_bias);
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
     CHECK(cudaMemcpy(host_Linear3_output_image, device_Linear3_output_image, batchsize * Linear3_output_height * sizeof(float), cudaMemcpyDeviceToHost));
