@@ -487,32 +487,18 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMemcpy(device_input_image, images, batchsize * Conv1_input_height * Conv1_input_height * sizeof(float), cudaMemcpyHostToDevice));
     // Conv1
     Conv1_ReLu<<<Conv1_blocksperGrid, Conv1_threadsperBlock>>>(device_input_image, device_Conv1_output_image, device_Conv1_kernel_weight, device_Conv1_kernel_bias);
-    CHECK(cudaDeviceSynchronize());
-    CHECK(cudaGetLastError());
     // MaxPool1
     MaxPool1<<<MaxPool1_blocksperGrid, MaxPool1_threadsperBlock>>>(device_Conv1_output_image, device_MaxPool1_output_image);
-    CHECK(cudaDeviceSynchronize());
-    CHECK(cudaGetLastError());
     // Conv2
     Conv2_ReLu<<<Conv2_blocksperGrid, Conv2_threadsperBlock>>>(device_MaxPool1_output_image, device_Conv2_output_image, device_Conv2_kernel_weight, device_Conv2_kernel_bias);
-    CHECK(cudaDeviceSynchronize());
-    CHECK(cudaGetLastError());
     // MaxPool2
     MaxPool2<<<MaxPool2_blocksperGrid, MaxPool2_threadsperBlock>>>(device_Conv2_output_image, device_MaxPool2_output_image);
-    CHECK(cudaDeviceSynchronize());
-    CHECK(cudaGetLastError());
     // Linear1
     Linear1_ReLu<<<Linear1_blocksperGrid, Linear1_threadsperBlock>>>(device_MaxPool2_output_image, device_Linear1_output_image, device_Linear1_kernel_weight, device_Linear1_kernel_bias);
-    CHECK(cudaDeviceSynchronize());
-    CHECK(cudaGetLastError());
     // Linear2
     Linear2_ReLu<<<Linear2_blocksperGrid, Linear2_threadsperBlock>>>(device_Linear1_output_image, device_Linear2_output_image, device_Linear2_kernel_weight, device_Linear2_kernel_bias);
-    CHECK(cudaDeviceSynchronize());
-    CHECK(cudaGetLastError());
     // Linear3
     Linear3_ReLu<<<Linear3_blocksperGrid, Linear3_threadsperBlock>>>(device_Linear2_output_image, device_Linear3_output_image, device_Linear3_kernel_weight, device_Linear3_kernel_bias);
-    CHECK(cudaDeviceSynchronize());
-    CHECK(cudaGetLastError());
     CHECK(cudaMemcpy(host_Linear3_output_image, device_Linear3_output_image, batchsize * Linear3_output_height * sizeof(float), cudaMemcpyDeviceToHost));
 
     auto end = std::chrono::high_resolution_clock::now();
