@@ -44,7 +44,8 @@ float *read_mnist_images(const std::string &path) {
                ((num_cols & 0x0000ff00) << 8) | ((num_cols & 0x000000ff) << 24);
 
     int image_size = num_rows * num_cols;
-    float *images = (float *)malloc(num_images * image_size * sizeof(float));
+    float *images;
+    CHECK(cudaMallocHost((void **)&images, num_images * image_size * sizeof(float), cudaHostAllocDefault));
 
     for (int i = 0; i < num_images; ++i) {
         for (int j = 0; j < image_size; ++j) {
@@ -477,7 +478,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMalloc((void **)&device_Linear3_kernel_bias, Linear3_output_height * sizeof(float)));
     CHECK(cudaMemcpy(device_Linear3_kernel_weight, &Linear3_weight[0], Linear3_output_height * Linear3_input_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Linear3_kernel_bias, &Linear3_bias[0], Linear3_output_height * sizeof(float), cudaMemcpyHostToDevice));
-    host_Linear3_output_image = (float *)malloc(batchsize * Linear3_output_height * sizeof(float));
+    CHECK(cudaMallocHost((void **)&host_Linear3_output_image, batchsize * Linear3_output_height * sizeof(float), cudaHostAllocDefault));
     dim3 Linear3_blocksperGrid(batchsize);
     dim3 Linear3_threadsperBlock(8, 8);
 

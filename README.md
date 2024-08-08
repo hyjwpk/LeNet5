@@ -17,6 +17,7 @@ GPU   	NVIDIA GeForce RTX 2060
 |  卷积 kernel 优化  | 0.0448s |
 | 全连接 kernel 优化 | 0.0271s |
 |    移除冗余同步    | 0.0240s |
+|    使用锁页内存    | 0.0207s |
 
 ## prof 结果
 
@@ -158,6 +159,36 @@ Profiling result:
                     0.00%     900ns         2     450ns     100ns     800ns  cuDeviceGet
                     0.00%     500ns         1     500ns     500ns     500ns  cuDeviceTotalMem
                     0.00%     400ns         1     400ns     400ns     400ns  cuModuleGetLoadingMode
+                    0.00%     100ns         1     100ns     100ns     100ns  cuDeviceGetUuid
+```
+
+### 使用锁页内存
+
+```bash
+Profiling application: ./infer
+Profiling result:
+            Type  Time(%)      Time     Calls       Avg       Min       Max  Name
+ GPU activities:   41.11%  8.3640ms         1  8.3640ms  8.3640ms  8.3640ms  Conv2_ReLu(float*, float*, float*, float*)
+                   23.97%  4.8775ms        11  443.41us  1.2800us  4.8399ms  [CUDA memcpy HtoD]
+                   15.53%  3.1592ms         1  3.1592ms  3.1592ms  3.1592ms  Linear1_ReLu(float*, float*, float*, float*)
+                    9.44%  1.9200ms         1  1.9200ms  1.9200ms  1.9200ms  Conv1_ReLu(float*, float*, float*, float*)
+                    4.56%  928.56us         1  928.56us  928.56us  928.56us  Linear2_ReLu(float*, float*, float*, float*)
+                    3.53%  718.60us         1  718.60us  718.60us  718.60us  MaxPool1(float*, float*)
+                    1.05%  214.57us         1  214.57us  214.57us  214.57us  MaxPool2(float*, float*)
+                    0.51%  104.61us         1  104.61us  104.61us  104.61us  Linear3_ReLu(float*, float*, float*, float*)
+                    0.30%  60.515us         1  60.515us  60.515us  60.515us  [CUDA memcpy DtoH]
+      API calls:   94.19%  637.19ms         2  318.59ms  882.00us  636.31ms  cudaHostAlloc
+                    4.40%  29.785ms        12  2.4821ms  50.600us  15.540ms  cudaMemcpy
+                    0.63%  4.2867ms        18  238.15us  2.5000us  1.2993ms  cudaFree
+                    0.50%  3.4124ms        18  189.58us  2.1000us  877.20us  cudaMalloc
+                    0.25%  1.7246ms         1  1.7246ms  1.7246ms  1.7246ms  cuDeviceGetPCIBusId
+                    0.01%  47.300us         7  6.7570us  2.9000us  25.200us  cudaLaunchKernel
+                    0.00%  17.800us       101     176ns     100ns     900ns  cuDeviceGetAttribute
+                    0.00%     900ns         3     300ns     100ns     600ns  cuDeviceGetCount
+                    0.00%     900ns         2     450ns     200ns     700ns  cuDeviceGet
+                    0.00%     700ns         1     700ns     700ns     700ns  cuDeviceGetName
+                    0.00%     300ns         1     300ns     300ns     300ns  cuModuleGetLoadingMode
+                    0.00%     300ns         1     300ns     300ns     300ns  cuDeviceTotalMem
                     0.00%     100ns         1     100ns     100ns     100ns  cuDeviceGetUuid
 ```
 
