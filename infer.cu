@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -207,17 +208,43 @@ __global__ void Conv2_ReLu(float *input_image, float *output_image, float *kerne
     }
 }
 
-__global__ void MaxPool(float *input_image, float *output_image, int input_height, int output_height, int channel) {
-    float value = 0;
-    for (int i = 0; i < 2; i++) {
-        for (int j = 0; j < 2; j++) {
-            int input_image_index = blockIdx.y * channel * input_height * input_height + blockIdx.x * input_height * input_height + OFFSET(threadIdx.y * 2 + i, threadIdx.x * 2 + j, input_height);
-            if (input_image[input_image_index] > value) {
-                value = input_image[input_image_index];
-            }
+__global__ void MaxPool1(float *input_image, float *output_image) {
+    if (threadIdx.y < 6 && threadIdx.x < 6) {
+        for (int o = 0; o < 6; o++) {
+            float value0 = 0, value1 = 0, value2 = 0, value3 = 0;
+            float4 image_data0 = ((float4 *)(input_image + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.y * 4, threadIdx.x * 4, 24)))[0];
+            float4 image_data1 = ((float4 *)(input_image + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.y * 4 + 1, threadIdx.x * 4, 24)))[0];
+            float4 image_data2 = ((float4 *)(input_image + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.y * 4 + 2, threadIdx.x * 4, 24)))[0];
+            float4 image_data3 = ((float4 *)(input_image + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.y * 4 + 3, threadIdx.x * 4, 24)))[0];
+            value0 = max(max(image_data0.x, image_data0.y), max(image_data1.x, image_data1.y));
+            value1 = max(max(image_data0.z, image_data0.w), max(image_data1.z, image_data1.w));
+            value2 = max(max(image_data2.x, image_data2.y), max(image_data3.x, image_data3.y));
+            value3 = max(max(image_data2.z, image_data2.w), max(image_data3.z, image_data3.w));
+            output_image[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.y * 2, threadIdx.x * 2, 12)] = value0;
+            output_image[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.y * 2, threadIdx.x * 2 + 1, 12)] = value1;
+            output_image[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.y * 2 + 1, threadIdx.x * 2, 12)] = value2;
+            output_image[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.y * 2 + 1, threadIdx.x * 2 + 1, 12)] = value3;
         }
     }
-    output_image[blockIdx.y * channel * output_height * output_height + blockIdx.x * output_height * output_height + threadIdx.y * output_height + threadIdx.x] = value;
+}
+
+__global__ void MaxPool2(float *input_image, float *output_image) {
+    int channel = (threadIdx.y * 8 + threadIdx.x) / 4;
+    int y = (threadIdx.y * 8 + threadIdx.x) % 4 / 2;
+    int x = (threadIdx.y * 8 + threadIdx.x) % 4 % 2;
+    float value0 = 0, value1 = 0, value2 = 0, value3 = 0;
+    float4 image_data0 = ((float4 *)(input_image + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4, x * 4, 8)))[0];
+    float4 image_data1 = ((float4 *)(input_image + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 1, x * 4, 8)))[0];
+    float4 image_data2 = ((float4 *)(input_image + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 2, x * 4, 8)))[0];
+    float4 image_data3 = ((float4 *)(input_image + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 3, x * 4, 8)))[0];
+    value0 = max(max(image_data0.x, image_data0.y), max(image_data1.x, image_data1.y));
+    value1 = max(max(image_data0.z, image_data0.w), max(image_data1.z, image_data1.w));
+    value2 = max(max(image_data2.x, image_data2.y), max(image_data3.x, image_data3.y));
+    value3 = max(max(image_data2.z, image_data2.w), max(image_data3.z, image_data3.w));
+    output_image[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2, x * 2, 4)] = value0;
+    output_image[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2, x * 2 + 1, 4)] = value1;
+    output_image[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2 + 1, x * 2, 4)] = value2;
+    output_image[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2 + 1, x * 2 + 1, 4)] = value3;
 }
 
 template <unsigned int blockSize>
@@ -381,8 +408,8 @@ int main(int argc, char *argv[]) {
     const int MaxPool1_channel = Conv1_output_channel;
     float *device_MaxPool1_output_image;
     CHECK(cudaMalloc((void **)&device_MaxPool1_output_image, batchsize * MaxPool1_channel * MaxPool1_output_height * MaxPool1_output_height * sizeof(float)));
-    dim3 MaxPool1_blocksperGrid(MaxPool1_channel, batchsize);
-    dim3 MaxPool1_threadsperBlock(MaxPool1_output_height, MaxPool1_output_height);
+    dim3 MaxPool1_blocksperGrid(batchsize);
+    dim3 MaxPool1_threadsperBlock(8, 8);
 
     // Conv2 [6, 12, 12] -> [16, 8, 8]
     const int Conv2_input_height = MaxPool1_output_height;
@@ -407,8 +434,8 @@ int main(int argc, char *argv[]) {
     const int MaxPool2_channel = Conv2_output_channel;
     float *device_MaxPool2_output_image;
     CHECK(cudaMalloc((void **)&device_MaxPool2_output_image, batchsize * MaxPool2_channel * MaxPool2_output_height * MaxPool2_output_height * sizeof(float)));
-    dim3 MaxPool2_blocksperGrid(MaxPool2_channel, batchsize);
-    dim3 MaxPool2_threadsperBlock(MaxPool2_output_height, MaxPool2_output_height);
+    dim3 MaxPool2_blocksperGrid(batchsize);
+    dim3 MaxPool2_threadsperBlock(8, 8);
 
     // Linear1 [256] -> [120]
     const int Linear1_input_height = MaxPool2_channel * MaxPool2_output_height * MaxPool2_output_height;
@@ -463,7 +490,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
     // MaxPool1
-    MaxPool<<<MaxPool1_blocksperGrid, MaxPool1_threadsperBlock>>>(device_Conv1_output_image, device_MaxPool1_output_image, MaxPool1_input_height, MaxPool1_output_height, MaxPool1_channel);
+    MaxPool1<<<MaxPool1_blocksperGrid, MaxPool1_threadsperBlock>>>(device_Conv1_output_image, device_MaxPool1_output_image);
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
     // Conv2
@@ -471,7 +498,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
     // MaxPool2
-    MaxPool<<<MaxPool2_blocksperGrid, MaxPool2_threadsperBlock>>>(device_Conv2_output_image, device_MaxPool2_output_image, MaxPool2_input_height, MaxPool2_output_height, MaxPool2_channel);
+    MaxPool2<<<MaxPool2_blocksperGrid, MaxPool2_threadsperBlock>>>(device_Conv2_output_image, device_MaxPool2_output_image);
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
     // Linear1
