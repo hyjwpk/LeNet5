@@ -97,56 +97,40 @@ std::vector<float> read_param(const std::string &path) {
 
 __global__ void Conv1_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
     __shared__ float input_image_shared[28][28];
-    __shared__ float kernel_weights_shared[6][5][5];
-    __shared__ float kernel_bias_shared[6];
+    __shared__ float kernel_weights_shared[5][5];
 
-    for (int i = 0; i < 3; i++) {
-        int pos = (threadIdx.y * 8 + threadIdx.x) * 4 + i * 256;
+    for (int i = 0; i < 6; i++) {
+        int pos = threadIdx.x * 4 + i * 128;
         float4 image_data = ((float4 *)(input_image + blockIdx.x * 28 * 28 + pos))[0];
         input_image_shared[pos / 28][pos % 28] = image_data.x;
         input_image_shared[(pos + 1) / 28][(pos + 1) % 28] = image_data.y;
         input_image_shared[(pos + 2) / 28][(pos + 2) % 28] = image_data.z;
         input_image_shared[(pos + 3) / 28][(pos + 3) % 28] = image_data.w;
     }
-    if (threadIdx.y == 0 && threadIdx.x < 4) {
-        int pos = threadIdx.x * 4 + 3 * 256;
-        float4 image_data = ((float4 *)(input_image + blockIdx.x * 28 * 28 + pos))[0];
-        input_image_shared[pos / 28][pos % 28] = image_data.x;
-        input_image_shared[(pos + 1) / 28][(pos + 1) % 28] = image_data.y;
-        input_image_shared[(pos + 2) / 28][(pos + 2) % 28] = image_data.z;
-        input_image_shared[(pos + 3) / 28][(pos + 3) % 28] = image_data.w;
+    if (threadIdx.x < 16) {
+        int pos = threadIdx.x + 6 * 128;
+        float image_data = ((float *)(input_image + blockIdx.x * 28 * 28 + pos))[0];
+        input_image_shared[pos / 28][pos % 28] = image_data;
     }
-    if (threadIdx.y * 8 + threadIdx.x < 37) {
-        int pos = (threadIdx.y * 8 + threadIdx.x) * 4;
-        float4 kernel_data = ((float4 *)(kernel_weights + pos))[0];
-        kernel_weights_shared[pos / 25][pos % 25 / 5][pos % 25 % 5] = kernel_data.x;
-        kernel_weights_shared[(pos + 1) / 25][(pos + 1) % 25 / 5][(pos + 1) % 25 % 5] = kernel_data.y;
-        kernel_weights_shared[(pos + 2) / 25][(pos + 2) % 25 / 5][(pos + 2) % 25 % 5] = kernel_data.z;
-        kernel_weights_shared[(pos + 3) / 25][(pos + 3) % 25 / 5][(pos + 3) % 25 % 5] = kernel_data.w;
-    }
-    if (threadIdx.y == 0 && threadIdx.x == 0) {
-        int pos = 37 * 4;
-        float2 kernel_data = ((float2 *)(kernel_weights + pos))[0];
-        kernel_weights_shared[pos / 25][pos % 25 / 5][pos % 25 % 5] = kernel_data.x;
-        kernel_weights_shared[(pos + 1) / 25][(pos + 1) % 25 / 5][(pos + 1) % 25 % 5] = kernel_data.y;
-    }
-    if (threadIdx.y == 0 && threadIdx.x < 6) {
-        kernel_bias_shared[threadIdx.x] = kernel_bias[threadIdx.x];
-    }
-    __syncthreads();
 
-    for (int ii = 0; ii < 3; ii++) {
+    for (int ii = 0; ii < 6; ii++) {
         for (int jj = 0; jj < 3; jj++) {
             for (int o = 0; o < 6; o++) {
+                if (threadIdx.x < 25) {
+                    int pos = threadIdx.x;
+                    float kernel_data = ((float *)(kernel_weights + o * 5 * 5 + pos))[0];
+                    kernel_weights_shared[pos / 5][pos % 5] = kernel_data;
+                }
+
                 float value = 0;
                 for (int i = 0; i < 5; i++) {
                     for (int j = 0; j < 5; j++) {
-                        value += input_image_shared[threadIdx.y * 3 + ii + i][threadIdx.x * 3 + jj + j] * kernel_weights_shared[o][i][j];
+                        value += input_image_shared[threadIdx.x / 8 + ii * 4 + i][threadIdx.x % 8 + jj * 8 + j] * kernel_weights_shared[i][j];
                     }
                 }
-                value += kernel_bias_shared[o];
+                value += kernel_bias[o];
                 value = value > 0 ? value : 0;
-                output_image[blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.y * 3 + ii, threadIdx.x * 3 + jj, 24)] = value;
+                output_image[blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.x / 8 + ii * 4, threadIdx.x % 8 + jj * 8, 24)] = value;
             }
         }
     }
@@ -154,58 +138,71 @@ __global__ void Conv1_ReLu(float *input_image, float *output_image, float *kerne
 
 __global__ void Conv2_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
     __shared__ float input_image_shared[6][12][12];
-    __shared__ float kernel_weights_shared[16][6][5][5];
-    __shared__ float kernel_bias_shared[16];
+    __shared__ float kernel_weights_shared[6][5][5];
 
-    for (int i = 0; i < 3; i++) {
-        int pos = (threadIdx.y * 8 + threadIdx.x) * 4 + i * 256;
+    for (int i = 0; i < 6; i++) {
+        int pos = threadIdx.x * 4 + i * 128;
         float4 image_data = ((float4 *)(input_image + blockIdx.x * 6 * 12 * 12 + pos))[0];
         input_image_shared[pos / 144][pos % 144 / 12][pos % 144 % 12] = image_data.x;
         input_image_shared[(pos + 1) / 144][(pos + 1) % 144 / 12][(pos + 1) % 144 % 12] = image_data.y;
         input_image_shared[(pos + 2) / 144][(pos + 2) % 144 / 12][(pos + 2) % 144 % 12] = image_data.z;
         input_image_shared[(pos + 3) / 144][(pos + 3) % 144 / 12][(pos + 3) % 144 % 12] = image_data.w;
     }
-    if (threadIdx.y * 8 + threadIdx.x < 24) {
-        int pos = (threadIdx.y * 8 + threadIdx.x) * 4 + 3 * 256;
-        float4 image_data = ((float4 *)(input_image + blockIdx.x * 6 * 12 * 12 + pos))[0];
+    {
+        int pos = threadIdx.x * 2 + 6 * 128;
+        float2 image_data = ((float2 *)(input_image + blockIdx.x * 6 * 12 * 12 + pos))[0];
         input_image_shared[pos / 144][pos % 144 / 12][pos % 144 % 12] = image_data.x;
         input_image_shared[(pos + 1) / 144][(pos + 1) % 144 / 12][(pos + 1) % 144 % 12] = image_data.y;
-        input_image_shared[(pos + 2) / 144][(pos + 2) % 144 / 12][(pos + 2) % 144 % 12] = image_data.z;
-        input_image_shared[(pos + 3) / 144][(pos + 3) % 144 / 12][(pos + 3) % 144 % 12] = image_data.w;
     }
-    for (int i = 0; i < 9; i++) {
-        int pos = (threadIdx.y * 8 + threadIdx.x) * 4 + i * 256;
-        float4 kernel_data = ((float4 *)(kernel_weights + pos))[0];
-        kernel_weights_shared[pos / 150][pos % 150 / 25][pos % 150 % 25 / 5][pos % 150 % 25 % 5] = kernel_data.x;
-        kernel_weights_shared[(pos + 1) / 150][(pos + 1) % 150 / 25][(pos + 1) % 150 % 25 / 5][(pos + 1) % 150 % 25 % 5] = kernel_data.y;
-        kernel_weights_shared[(pos + 2) / 150][(pos + 2) % 150 / 25][(pos + 2) % 150 % 25 / 5][(pos + 2) % 150 % 25 % 5] = kernel_data.z;
-        kernel_weights_shared[(pos + 3) / 150][(pos + 3) % 150 / 25][(pos + 3) % 150 % 25 / 5][(pos + 3) % 150 % 25 % 5] = kernel_data.w;
+    {
+        int pos = threadIdx.x + 6 * 128 + 64;
+        float image_data = ((float *)(input_image + blockIdx.x * 6 * 12 * 12 + pos))[0];
+        input_image_shared[pos / 144][pos % 144 / 12][pos % 144 % 12] = image_data;
     }
-    if (threadIdx.y * 8 + threadIdx.x < 24) {
-        int pos = (threadIdx.y * 8 + threadIdx.x) * 4 + 9 * 256;
-        float4 kernel_data = ((float4 *)(kernel_weights + pos))[0];
-        kernel_weights_shared[pos / 150][pos % 150 / 25][pos % 150 % 25 / 5][pos % 150 % 25 % 5] = kernel_data.x;
-        kernel_weights_shared[(pos + 1) / 150][(pos + 1) % 150 / 25][(pos + 1) % 150 % 25 / 5][(pos + 1) % 150 % 25 % 5] = kernel_data.y;
-        kernel_weights_shared[(pos + 2) / 150][(pos + 2) % 150 / 25][(pos + 2) % 150 % 25 / 5][(pos + 2) % 150 % 25 % 5] = kernel_data.z;
-        kernel_weights_shared[(pos + 3) / 150][(pos + 3) % 150 / 25][(pos + 3) % 150 % 25 / 5][(pos + 3) % 150 % 25 % 5] = kernel_data.w;
-    }
-    if (threadIdx.y * blockDim.x + threadIdx.x < 16) {
-        kernel_bias_shared[threadIdx.y * blockDim.x + threadIdx.x] = kernel_bias[threadIdx.y * blockDim.x + threadIdx.x];
-    }
-    __syncthreads();
 
     for (int o = 0; o < 16; o++) {
+        {
+            int pos = threadIdx.x * 2;
+            float2 kernel_data = ((float2 *)(kernel_weights + o * 6 * 5 * 5 + pos))[0];
+            kernel_weights_shared[pos / 25][pos % 25 / 5][pos % 25 % 5] = kernel_data.x;
+            kernel_weights_shared[(pos + 1) / 25][(pos + 1) % 25 / 5][(pos + 1) % 25 % 5] = kernel_data.y;
+        }
+        {
+            int pos = threadIdx.x * 2 + 64;
+            float2 kernel_data = ((float2 *)(kernel_weights + o * 6 * 5 * 5 + pos))[0];
+            kernel_weights_shared[pos / 25][pos % 25 / 5][pos % 25 % 5] = kernel_data.x;
+            kernel_weights_shared[(pos + 1) / 25][(pos + 1) % 25 / 5][(pos + 1) % 25 % 5] = kernel_data.y;
+        }
+        if (threadIdx.x < 22) {
+            int pos = threadIdx.x + 128;
+            float kernel_data = ((float *)(kernel_weights + o * 6 * 5 * 5 + pos))[0];
+            kernel_weights_shared[pos / 25][pos % 25 / 5][pos % 25 % 5] = kernel_data;
+        }
+
+        float bias = kernel_bias[o];
         float value = 0;
         for (int z = 0; z < 6; z++) {
             for (int i = 0; i < 5; i++) {
                 for (int j = 0; j < 5; j++) {
-                    value += input_image_shared[z][threadIdx.y + i][threadIdx.x + j] * kernel_weights_shared[o][z][i][j];
+                    value += input_image_shared[z][threadIdx.x / 8 + i][threadIdx.x % 8 + j] * kernel_weights_shared[z][i][j];
                 }
             }
         }
-        value += kernel_bias_shared[o];
+        value += bias;
         value = value > 0 ? value : 0;
-        output_image[blockIdx.x * 16 * 8 * 8 + o * 8 * 8 + OFFSET(threadIdx.y, threadIdx.x, 8)] = value;
+        output_image[blockIdx.x * 16 * 8 * 8 + o * 8 * 8 + OFFSET(threadIdx.x / 8, threadIdx.x % 8, 8)] = value;
+
+        value = 0;
+        for (int z = 0; z < 6; z++) {
+            for (int i = 0; i < 5; i++) {
+                for (int j = 0; j < 5; j++) {
+                    value += input_image_shared[z][threadIdx.x / 8 + 4 + i][threadIdx.x % 8 + j] * kernel_weights_shared[z][i][j];
+                }
+            }
+        }
+        value += bias;
+        value = value > 0 ? value : 0;
+        output_image[blockIdx.x * 16 * 8 * 8 + o * 8 * 8 + OFFSET(threadIdx.x / 8 + 4, threadIdx.x % 8, 8)] = value;
     }
 }
 
@@ -264,106 +261,66 @@ __device__ __forceinline__ float warpReduceSum(float sum) {
 }
 
 __global__ void Linear1_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
-    for (int i = 0; i < 120; i += 2) {
+    float4 image_data0 = ((float4 *)(input_image + blockIdx.x * 256 + threadIdx.x * 4))[0];
+    float4 image_data1 = ((float4 *)(input_image + blockIdx.x * 256 + threadIdx.x * 4 + 128))[0];
+    for (int i = 0; i < 120; i++) {
         float value = 0;
-        if (threadIdx.y < 4) {
-            float4 image_data0 = ((float4 *)(input_image + blockIdx.x * 256 + (threadIdx.y * 8 + threadIdx.x) * 8))[0];
-            float4 image_data1 = ((float4 *)(input_image + blockIdx.x * 256 + (threadIdx.y * 8 + threadIdx.x) * 8 + 4))[0];
-            float4 kernel_data0 = ((float4 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 8, 256)))[0];
-            float4 kernel_data1 = ((float4 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 8 + 4, 256)))[0];
-            value += image_data0.x * kernel_data0.x + image_data0.y * kernel_data0.y + image_data0.z * kernel_data0.z + image_data0.w * kernel_data0.w;
-            value += image_data1.x * kernel_data1.x + image_data1.y * kernel_data1.y + image_data1.z * kernel_data1.z + image_data1.w * kernel_data1.w;
-            value = warpReduceSum<32>(value);
-            if (threadIdx.y == 0 && threadIdx.x == 0) {
-                value += kernel_bias[i];
-                value = value > 0 ? value : 0;
-                output_image[blockIdx.x * 120 + i] = value;
-            }
-        } else {
-            float4 image_data0 = ((float4 *)(input_image + blockIdx.x * 256 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 8))[0];
-            float4 image_data1 = ((float4 *)(input_image + blockIdx.x * 256 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 8 + 4))[0];
-            float4 kernel_data0 = ((float4 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 8, 256)))[0];
-            float4 kernel_data1 = ((float4 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 8 + 4, 256)))[0];
-            value += image_data0.x * kernel_data0.x + image_data0.y * kernel_data0.y + image_data0.z * kernel_data0.z + image_data0.w * kernel_data0.w;
-            value += image_data1.x * kernel_data1.x + image_data1.y * kernel_data1.y + image_data1.z * kernel_data1.z + image_data1.w * kernel_data1.w;
-            value = warpReduceSum<32>(value);
-            if (threadIdx.y == 4 && threadIdx.x == 0) {
-                value += kernel_bias[i + 1];
-                value = value > 0 ? value : 0;
-                output_image[blockIdx.x * 120 + i + 1] = value;
-            }
+        float4 kernel_data0 = ((float4 *)(kernel_weights + OFFSET(i, threadIdx.x * 4, 256)))[0];
+        float4 kernel_data1 = ((float4 *)(kernel_weights + OFFSET(i, threadIdx.x * 4 + 128, 256)))[0];
+        value += image_data0.x * kernel_data0.x + image_data0.y * kernel_data0.y + image_data0.z * kernel_data0.z + image_data0.w * kernel_data0.w;
+        value += image_data1.x * kernel_data1.x + image_data1.y * kernel_data1.y + image_data1.z * kernel_data1.z + image_data1.w * kernel_data1.w;
+        value = warpReduceSum<32>(value);
+        if (threadIdx.x == 0) {
+            value += kernel_bias[i];
+            value = value > 0 ? value : 0;
+            output_image[blockIdx.x * 120 + i] = value;
         }
     }
 }
 
 __global__ void Linear2_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
-    for (int i = 0; i < 84; i += 2) {
+    float2 image_data0 = ((float2 *)(input_image + blockIdx.x * 120 + threadIdx.x * 2))[0];
+    float image_data1 = ((float *)(input_image + blockIdx.x * 120 + threadIdx.x + 64))[0];
+    float image_data2 = 0;
+    if (threadIdx.x < 24) {
+        image_data2 = ((float *)(input_image + blockIdx.x * 120 + threadIdx.x + 96))[0];
+    }
+    for (int i = 0; i < 84; i++) {
         float value = 0;
-        if (threadIdx.y < 4) {
-            float2 image_data = ((float2 *)(input_image + blockIdx.x * 120 + (threadIdx.y * 8 + threadIdx.x) * 2))[0];
-            float2 kernel_data = ((float2 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 2, 120)))[0];
-            value += image_data.x * kernel_data.x + image_data.y * kernel_data.y;
-            if (threadIdx.y * 8 + threadIdx.x < 14) {
-                float4 image_data = ((float4 *)(input_image + blockIdx.x * 120 + (threadIdx.y * 8 + threadIdx.x) * 4 + 64))[0];
-                float4 kernel_data = ((float4 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 4 + 64, 120)))[0];
-                value += image_data.x * kernel_data.x + image_data.y * kernel_data.y + image_data.z * kernel_data.z + image_data.w * kernel_data.w;
-            }
-            value = warpReduceSum<32>(value);
-            if (threadIdx.y == 0 && threadIdx.x == 0) {
-                value += kernel_bias[i];
-                value = value > 0 ? value : 0;
-                output_image[blockIdx.x * 84 + i] = value;
-            }
-        } else {
-            float2 image_data = ((float2 *)(input_image + blockIdx.x * 120 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 2))[0];
-            float2 kernel_data = ((float2 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 2, 120)))[0];
-            value += image_data.x * kernel_data.x + image_data.y * kernel_data.y;
-            if ((threadIdx.y - 4) * 8 + threadIdx.x < 14) {
-                float4 image_data = ((float4 *)(input_image + blockIdx.x * 120 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 4 + 64))[0];
-                float4 kernel_data = ((float4 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 4 + 64, 120)))[0];
-                value += image_data.x * kernel_data.x + image_data.y * kernel_data.y + image_data.z * kernel_data.z + image_data.w * kernel_data.w;
-            }
-            value = warpReduceSum<32>(value);
-            if (threadIdx.y - 4 == 0 && threadIdx.x == 0) {
-                value += kernel_bias[i + 1];
-                value = value > 0 ? value : 0;
-                output_image[blockIdx.x * 84 + i + 1] = value;
-            }
+        float2 kernel_data0 = ((float2 *)(kernel_weights + OFFSET(i, threadIdx.x * 2, 120)))[0];
+        float kernel_data1 = ((float *)(kernel_weights + OFFSET(i, threadIdx.x + 64, 120)))[0];
+        float kernel_data2 = 0;
+        if (threadIdx.x < 24) {
+            kernel_data2 = ((float *)(kernel_weights + OFFSET(i, threadIdx.x + 96, 120)))[0];
+        }
+        value += image_data0.x * kernel_data0.x + image_data0.y * kernel_data0.y + image_data1 * kernel_data1 + image_data2 * kernel_data2;
+        value = warpReduceSum<32>(value);
+        if (threadIdx.x == 0) {
+            value += kernel_bias[i];
+            value = value > 0 ? value : 0;
+            output_image[blockIdx.x * 84 + i] = value;
         }
     }
 }
 
 __global__ void Linear3_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
-    for (int i = 0; i < 10; i += 2) {
+    float2 image_data0 = ((float2 *)(input_image + blockIdx.x * 84 + threadIdx.x * 2))[0];
+    float image_data1 = 0;
+    if (threadIdx.x < 20) {
+        image_data1 = ((float *)(input_image + blockIdx.x * 84 + threadIdx.x + 64))[0];
+    }
+    for (int i = 0; i < 10; i++) {
         float value = 0;
-        if (threadIdx.y < 4) {
-            float2 image_data = ((float2 *)(input_image + blockIdx.x * 84 + (threadIdx.y * 8 + threadIdx.x) * 2))[0];
-            float2 kernel_data = ((float2 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 2, 84)))[0];
-            value += image_data.x * kernel_data.x + image_data.y * kernel_data.y;
-            if (threadIdx.y * 8 + threadIdx.x < 5) {
-                float4 image_data = ((float4 *)(input_image + blockIdx.x * 84 + (threadIdx.y * 8 + threadIdx.x) * 4 + 64))[0];
-                float4 kernel_data = ((float4 *)(kernel_weights + OFFSET(i, (threadIdx.y * 8 + threadIdx.x) * 4 + 64, 84)))[0];
-                value += image_data.x * kernel_data.x + image_data.y * kernel_data.y + image_data.z * kernel_data.z + image_data.w * kernel_data.w;
-            }
-            value = warpReduceSum<32>(value);
-            if (threadIdx.y == 0 && threadIdx.x == 0) {
-                value += kernel_bias[i];
-                output_image[blockIdx.x * 10 + i] = value;
-            }
-        } else {
-            float2 image_data = ((float2 *)(input_image + blockIdx.x * 84 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 2))[0];
-            float2 kernel_data = ((float2 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 2, 84)))[0];
-            value += image_data.x * kernel_data.x + image_data.y * kernel_data.y;
-            if ((threadIdx.y - 4) * 8 + threadIdx.x < 5) {
-                float4 image_data = ((float4 *)(input_image + blockIdx.x * 84 + ((threadIdx.y - 4) * 8 + threadIdx.x) * 4 + 64))[0];
-                float4 kernel_data = ((float4 *)(kernel_weights + OFFSET(i + 1, ((threadIdx.y - 4) * 8 + threadIdx.x) * 4 + 64, 84)))[0];
-                value += image_data.x * kernel_data.x + image_data.y * kernel_data.y + image_data.z * kernel_data.z + image_data.w * kernel_data.w;
-            }
-            value = warpReduceSum<32>(value);
-            if (threadIdx.y - 4 == 0 && threadIdx.x == 0) {
-                value += kernel_bias[i + 1];
-                output_image[blockIdx.x * 10 + i + 1] = value;
-            }
+        float2 kernel_data0 = ((float2 *)(kernel_weights + OFFSET(i, threadIdx.x * 2, 84)))[0];
+        float kernel_data1 = 0;
+        if (threadIdx.x < 20) {
+            kernel_data1 = ((float *)(kernel_weights + OFFSET(i, threadIdx.x + 64, 84)))[0];
+        }
+        value += image_data0.x * kernel_data0.x + image_data0.y * kernel_data0.y + image_data1 * kernel_data1;
+        value = warpReduceSum<32>(value);
+        if (threadIdx.x == 0) {
+            value += kernel_bias[i];
+            output_image[blockIdx.x * 10 + i] = value;
         }
     }
 }
@@ -401,7 +358,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMemcpy(device_Conv1_kernel_weight, &Conv1_weight[0], Conv1_output_channel * Conv1_input_channel * Conv1_kernel_height * Conv1_kernel_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Conv1_kernel_bias, &Conv1_bias[0], Conv1_output_channel * sizeof(float), cudaMemcpyHostToDevice));
     dim3 Conv1_blocksperGrid(batchsize);
-    dim3 Conv1_threadsperBlock(8, 8);
+    dim3 Conv1_threadsperBlock(32);
 
     // MaxPool1 [6, 24, 24] -> [6, 12, 12]
     const int MaxPool1_input_height = Conv1_output_height;
@@ -427,7 +384,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMemcpy(device_Conv2_kernel_weight, &Conv2_weight[0], Conv2_output_channel * Conv2_input_channel * Conv2_kernel_height * Conv2_kernel_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Conv2_kernel_bias, &Conv2_bias[0], Conv2_output_channel * sizeof(float), cudaMemcpyHostToDevice));
     dim3 Conv2_blocksperGrid(batchsize);
-    dim3 Conv2_threadsperBlock(8, 8);
+    dim3 Conv2_threadsperBlock(32);
 
     // MaxPool2 [16, 8, 8] -> [16, 4, 4]
     const int MaxPool2_input_height = Conv2_output_height;
@@ -450,7 +407,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMemcpy(device_Linear1_kernel_weight, &Linear1_weight[0], Linear1_output_height * Linear1_input_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Linear1_kernel_bias, &Linear1_bias[0], Linear1_output_height * sizeof(float), cudaMemcpyHostToDevice));
     dim3 Linear1_blocksperGrid(batchsize);
-    dim3 Linear1_threadsperBlock(8, 8);
+    dim3 Linear1_threadsperBlock(32);
 
     // Linear2 [120] -> [84]
     const int Linear2_input_height = Linear1_output_height;
@@ -464,7 +421,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMemcpy(device_Linear2_kernel_weight, &Linear2_weight[0], Linear2_output_height * Linear2_input_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Linear2_kernel_bias, &Linear2_bias[0], Linear2_output_height * sizeof(float), cudaMemcpyHostToDevice));
     dim3 Linear2_blocksperGrid(batchsize);
-    dim3 Linear2_threadsperBlock(8, 8);
+    dim3 Linear2_threadsperBlock(32);
 
     // Linear3 [84] -> [10]
     const int Linear3_input_height = Linear2_output_height;
@@ -480,7 +437,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMemcpy(device_Linear3_kernel_bias, &Linear3_bias[0], Linear3_output_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMallocHost((void **)&host_Linear3_output_image, batchsize * Linear3_output_height * sizeof(float), cudaHostAllocDefault));
     dim3 Linear3_blocksperGrid(batchsize);
-    dim3 Linear3_threadsperBlock(8, 8);
+    dim3 Linear3_threadsperBlock(32);
 
     int correct_nums = 0;
     auto start = std::chrono::high_resolution_clock::now();

@@ -8,16 +8,17 @@ GPU   	NVIDIA GeForce RTX 2060
 
 ## 性能数据（推理 1w 张图片）
 
-|                    |  时间   |
-| :----------------: | :-----: |
-| torch cpu baseline | 0.3000s |
-| torch gpu baseline | 0.0150s |
-|   cuda baseline    | 6.3073s |
-|    图片并行推理    | 0.0527s |
-|  卷积 kernel 优化  | 0.0448s |
-| 全连接 kernel 优化 | 0.0271s |
-|    移除冗余同步    | 0.0240s |
-|    使用锁页内存    | 0.0207s |
+|                        |  时间   |
+| :--------------------: | :-----: |
+|   torch cpu baseline   | 0.3000s |
+|   torch gpu baseline   | 0.0150s |
+|     cuda baseline      | 6.3073s |
+|      图片并行推理      | 0.0527s |
+|    卷积 kernel 优化    | 0.0448s |
+|   全连接 kernel 优化   | 0.0271s |
+|      移除冗余同步      | 0.0240s |
+|      使用锁页内存      | 0.0207s |
+| 全连接 kernel 访存合并 | 0.0188s |
 
 ## prof 结果
 
@@ -189,6 +190,36 @@ Profiling result:
                     0.00%     700ns         1     700ns     700ns     700ns  cuDeviceGetName
                     0.00%     300ns         1     300ns     300ns     300ns  cuModuleGetLoadingMode
                     0.00%     300ns         1     300ns     300ns     300ns  cuDeviceTotalMem
+                    0.00%     100ns         1     100ns     100ns     100ns  cuDeviceGetUuid
+```
+
+### 全连接 kernel 访存合并 
+
+```bash
+==426896== Profiling application: ./infer
+==426896== Profiling result:
+            Type  Time(%)      Time     Calls       Avg       Min       Max  Name
+ GPU activities:   44.47%  8.2537ms         1  8.2537ms  8.2537ms  8.2537ms  Conv2_ReLu(float*, float*, float*, float*)
+                   26.24%  4.8705ms        11  442.77us  1.2800us  4.8331ms  [CUDA memcpy HtoD]
+                   10.66%  1.9780ms         1  1.9780ms  1.9780ms  1.9780ms  Conv1_ReLu(float*, float*, float*, float*)
+                    8.40%  1.5597ms         1  1.5597ms  1.5597ms  1.5597ms  Linear1_ReLu(float*, float*, float*, float*)
+                    4.31%  799.88us         1  799.88us  799.88us  799.88us  Linear2_ReLu(float*, float*, float*, float*)
+                    3.87%  718.12us         1  718.12us  718.12us  718.12us  MaxPool1(float*, float*)
+                    1.16%  214.50us         1  214.50us  214.50us  214.50us  MaxPool2(float*, float*)
+                    0.50%  93.216us         1  93.216us  93.216us  93.216us  Linear3_ReLu(float*, float*, float*, float*)
+                    0.40%  73.441us         1  73.441us  73.441us  73.441us  [CUDA memcpy DtoH]
+      API calls:   94.53%  634.53ms         2  317.26ms  804.20us  633.72ms  cudaHostAlloc
+                    4.04%  27.104ms        12  2.2587ms  32.100us  13.775ms  cudaMemcpy
+                    0.59%  3.9320ms        18  218.44us  2.3000us  1.1263ms  cudaMalloc
+                    0.53%  3.5893ms        18  199.41us  2.3000us  1.1967ms  cudaFree
+                    0.31%  2.0558ms         1  2.0558ms  2.0558ms  2.0558ms  cuDeviceGetPCIBusId
+                    0.01%  44.300us         7  6.3280us  2.8000us  22.700us  cudaLaunchKernel
+                    0.00%  14.200us       101     140ns     100ns     800ns  cuDeviceGetAttribute
+                    0.00%  1.0000us         2     500ns     200ns     800ns  cuDeviceGet
+                    0.00%     900ns         1     900ns     900ns     900ns  cuDeviceGetName
+                    0.00%     700ns         3     233ns     100ns     400ns  cuDeviceGetCount
+                    0.00%     300ns         1     300ns     300ns     300ns  cuDeviceTotalMem
+                    0.00%     200ns         1     200ns     200ns     200ns  cuModuleGetLoadingMode
                     0.00%     100ns         1     100ns     100ns     100ns  cuDeviceGetUuid
 ```
 
