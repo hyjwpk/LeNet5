@@ -95,7 +95,7 @@ std::vector<float> read_param(const std::string &path) {
     return params;
 }
 
-__global__ void Conv1_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
+__global__ void Conv1_ReLu(float *input_image, float *output_image_1, float *output_image_2, float *kernel_weights, float *kernel_bias) {
     __shared__ float input_image_shared[28][28];
     __shared__ float kernel_weights_shared[5][5];
 
@@ -130,13 +130,45 @@ __global__ void Conv1_ReLu(float *input_image, float *output_image, float *kerne
                 }
                 value += kernel_bias[o];
                 value = value > 0 ? value : 0;
-                output_image[blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.x / 8 + ii * 4, threadIdx.x % 8 + jj * 8, 24)] = value;
+                output_image_1[blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.x / 8 + ii * 4, threadIdx.x % 8 + jj * 8, 24)] = value;
             }
+        }
+    }
+
+    for (int o = 0; o < 6; o++) {
+        float value;
+        float2 image_data0, image_data1;
+
+        image_data0 = ((float2 *)(output_image_1 + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.x / 8 * 2, threadIdx.x % 8 * 2, 24)))[0];
+        image_data1 = ((float2 *)(output_image_1 + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.x / 8 * 2 + 1, threadIdx.x % 8 * 2, 24)))[0];
+        value = max(max(image_data0.x, image_data0.y), max(image_data1.x, image_data1.y));
+        output_image_2[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.x / 8, threadIdx.x % 8, 12)] = value;
+
+        image_data0 = ((float2 *)(output_image_1 + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET((threadIdx.x / 8 + 4) * 2, threadIdx.x % 8 * 2, 24)))[0];
+        image_data1 = ((float2 *)(output_image_1 + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET((threadIdx.x / 8 + 4) * 2 + 1, threadIdx.x % 8 * 2, 24)))[0];
+        value = max(max(image_data0.x, image_data0.y), max(image_data1.x, image_data1.y));
+        output_image_2[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.x / 8 + 4, threadIdx.x % 8, 12)] = value;
+
+        image_data0 = ((float2 *)(output_image_1 + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET((threadIdx.x / 8 + 8) * 2, threadIdx.x % 8 * 2, 24)))[0];
+        image_data1 = ((float2 *)(output_image_1 + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET((threadIdx.x / 8 + 8) * 2 + 1, threadIdx.x % 8 * 2, 24)))[0];
+        value = max(max(image_data0.x, image_data0.y), max(image_data1.x, image_data1.y));
+        output_image_2[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.x / 8 + 8, threadIdx.x % 8, 12)] = value;
+
+        image_data0 = ((float2 *)(output_image_1 + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.x / 4 * 2, (threadIdx.x % 4 + 8) * 2, 24)))[0];
+        image_data1 = ((float2 *)(output_image_1 + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.x / 4 * 2 + 1, (threadIdx.x % 4 + 8) * 2, 24)))[0];
+        value = max(max(image_data0.x, image_data0.y), max(image_data1.x, image_data1.y));
+        output_image_2[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.x / 4, threadIdx.x % 4 + 8, 12)] = value;
+
+        if (threadIdx.x < 16) {
+            image_data0 = ((float2 *)(output_image_1 + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET((threadIdx.x / 4 + 8) * 2, (threadIdx.x % 4 + 8) * 2, 24)))[0];
+            image_data1 = ((float2 *)(output_image_1 + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET((threadIdx.x / 4 + 8) * 2 + 1, (threadIdx.x % 4 + 8) * 2, 24)))[0];
+            value = max(max(image_data0.x, image_data0.y), max(image_data1.x, image_data1.y));
+            output_image_2[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.x / 4 + 8, threadIdx.x % 4 + 8, 12)] = value;
         }
     }
 }
 
-__global__ void Conv2_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
+__global__ void Conv2_ReLu(float *input_image, float *output_image_1, float *output_image_2, float *kernel_weights, float *kernel_bias) {
     __shared__ float input_image_shared[6][12][12];
     __shared__ float kernel_weights_shared[6][5][5];
 
@@ -190,7 +222,7 @@ __global__ void Conv2_ReLu(float *input_image, float *output_image, float *kerne
         }
         value += bias;
         value = value > 0 ? value : 0;
-        output_image[blockIdx.x * 16 * 8 * 8 + o * 8 * 8 + OFFSET(threadIdx.x / 8, threadIdx.x % 8, 8)] = value;
+        output_image_1[blockIdx.x * 16 * 8 * 8 + o * 8 * 8 + OFFSET(threadIdx.x / 8, threadIdx.x % 8, 8)] = value;
 
         value = 0;
         for (int z = 0; z < 6; z++) {
@@ -202,47 +234,39 @@ __global__ void Conv2_ReLu(float *input_image, float *output_image, float *kerne
         }
         value += bias;
         value = value > 0 ? value : 0;
-        output_image[blockIdx.x * 16 * 8 * 8 + o * 8 * 8 + OFFSET(threadIdx.x / 8 + 4, threadIdx.x % 8, 8)] = value;
+        output_image_1[blockIdx.x * 16 * 8 * 8 + o * 8 * 8 + OFFSET(threadIdx.x / 8 + 4, threadIdx.x % 8, 8)] = value;
     }
-}
 
-__global__ void MaxPool1(float *input_image, float *output_image) {
-    if (threadIdx.y < 6 && threadIdx.x < 6) {
-        for (int o = 0; o < 6; o++) {
-            float value0 = 0, value1 = 0, value2 = 0, value3 = 0;
-            float4 image_data0 = ((float4 *)(input_image + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.y * 4, threadIdx.x * 4, 24)))[0];
-            float4 image_data1 = ((float4 *)(input_image + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.y * 4 + 1, threadIdx.x * 4, 24)))[0];
-            float4 image_data2 = ((float4 *)(input_image + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.y * 4 + 2, threadIdx.x * 4, 24)))[0];
-            float4 image_data3 = ((float4 *)(input_image + blockIdx.x * 6 * 24 * 24 + o * 24 * 24 + OFFSET(threadIdx.y * 4 + 3, threadIdx.x * 4, 24)))[0];
-            value0 = max(max(image_data0.x, image_data0.y), max(image_data1.x, image_data1.y));
-            value1 = max(max(image_data0.z, image_data0.w), max(image_data1.z, image_data1.w));
-            value2 = max(max(image_data2.x, image_data2.y), max(image_data3.x, image_data3.y));
-            value3 = max(max(image_data2.z, image_data2.w), max(image_data3.z, image_data3.w));
-            output_image[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.y * 2, threadIdx.x * 2, 12)] = value0;
-            output_image[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.y * 2, threadIdx.x * 2 + 1, 12)] = value1;
-            output_image[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.y * 2 + 1, threadIdx.x * 2, 12)] = value2;
-            output_image[blockIdx.x * 6 * 12 * 12 + o * 12 * 12 + OFFSET(threadIdx.y * 2 + 1, threadIdx.x * 2 + 1, 12)] = value3;
-        }
-    }
-}
-
-__global__ void MaxPool2(float *input_image, float *output_image) {
-    int channel = (threadIdx.y * 8 + threadIdx.x) / 4;
-    int y = (threadIdx.y * 8 + threadIdx.x) % 4 / 2;
-    int x = (threadIdx.y * 8 + threadIdx.x) % 4 % 2;
+    int channel = threadIdx.x / 4;
+    int y = threadIdx.x % 4 / 2;
+    int x = threadIdx.x % 4 % 2;
     float value0 = 0, value1 = 0, value2 = 0, value3 = 0;
-    float4 image_data0 = ((float4 *)(input_image + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4, x * 4, 8)))[0];
-    float4 image_data1 = ((float4 *)(input_image + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 1, x * 4, 8)))[0];
-    float4 image_data2 = ((float4 *)(input_image + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 2, x * 4, 8)))[0];
-    float4 image_data3 = ((float4 *)(input_image + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 3, x * 4, 8)))[0];
+    float4 image_data0 = ((float4 *)(output_image_1 + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4, x * 4, 8)))[0];
+    float4 image_data1 = ((float4 *)(output_image_1 + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 1, x * 4, 8)))[0];
+    float4 image_data2 = ((float4 *)(output_image_1 + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 2, x * 4, 8)))[0];
+    float4 image_data3 = ((float4 *)(output_image_1 + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 3, x * 4, 8)))[0];
     value0 = max(max(image_data0.x, image_data0.y), max(image_data1.x, image_data1.y));
     value1 = max(max(image_data0.z, image_data0.w), max(image_data1.z, image_data1.w));
     value2 = max(max(image_data2.x, image_data2.y), max(image_data3.x, image_data3.y));
     value3 = max(max(image_data2.z, image_data2.w), max(image_data3.z, image_data3.w));
-    output_image[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2, x * 2, 4)] = value0;
-    output_image[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2, x * 2 + 1, 4)] = value1;
-    output_image[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2 + 1, x * 2, 4)] = value2;
-    output_image[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2 + 1, x * 2 + 1, 4)] = value3;
+    output_image_2[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2, x * 2, 4)] = value0;
+    output_image_2[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2, x * 2 + 1, 4)] = value1;
+    output_image_2[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2 + 1, x * 2, 4)] = value2;
+    output_image_2[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2 + 1, x * 2 + 1, 4)] = value3;
+
+    channel = threadIdx.x / 4 + 8;
+    image_data0 = ((float4 *)(output_image_1 + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4, x * 4, 8)))[0];
+    image_data1 = ((float4 *)(output_image_1 + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 1, x * 4, 8)))[0];
+    image_data2 = ((float4 *)(output_image_1 + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 2, x * 4, 8)))[0];
+    image_data3 = ((float4 *)(output_image_1 + blockIdx.x * 16 * 8 * 8 + channel * 8 * 8 + OFFSET(y * 4 + 3, x * 4, 8)))[0];
+    value0 = max(max(image_data0.x, image_data0.y), max(image_data1.x, image_data1.y));
+    value1 = max(max(image_data0.z, image_data0.w), max(image_data1.z, image_data1.w));
+    value2 = max(max(image_data2.x, image_data2.y), max(image_data3.x, image_data3.y));
+    value3 = max(max(image_data2.z, image_data2.w), max(image_data3.z, image_data3.w));
+    output_image_2[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2, x * 2, 4)] = value0;
+    output_image_2[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2, x * 2 + 1, 4)] = value1;
+    output_image_2[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2 + 1, x * 2, 4)] = value2;
+    output_image_2[blockIdx.x * 16 * 4 * 4 + channel * 4 * 4 + OFFSET(y * 2 + 1, x * 2 + 1, 4)] = value3;
 }
 
 template <unsigned int blockSize>
@@ -260,66 +284,60 @@ __device__ __forceinline__ float warpReduceSum(float sum) {
     return sum;
 }
 
-__global__ void Linear1_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
+__global__ void Linear_ReLu(float *input_image, float *output_image, float *Linear1_kernel_weights, float *Linear1_kernel_bias, float *Linear2_kernel_weights, float *Linear2_kernel_bias, float *Linear3_kernel_weights, float *Linear3_kernel_bias) {
+    __shared__ float output_image_shared1[120];
+    __shared__ float output_image_shared2[84];
+
     float4 image_data0 = ((float4 *)(input_image + blockIdx.x * 256 + threadIdx.x * 4))[0];
     float4 image_data1 = ((float4 *)(input_image + blockIdx.x * 256 + threadIdx.x * 4 + 128))[0];
     for (int i = 0; i < 120; i++) {
         float value = 0;
-        float4 kernel_data0 = ((float4 *)(kernel_weights + OFFSET(i, threadIdx.x * 4, 256)))[0];
-        float4 kernel_data1 = ((float4 *)(kernel_weights + OFFSET(i, threadIdx.x * 4 + 128, 256)))[0];
+        float4 kernel_data0 = ((float4 *)(Linear1_kernel_weights + OFFSET(i, threadIdx.x * 4, 256)))[0];
+        float4 kernel_data1 = ((float4 *)(Linear1_kernel_weights + OFFSET(i, threadIdx.x * 4 + 128, 256)))[0];
         value += image_data0.x * kernel_data0.x + image_data0.y * kernel_data0.y + image_data0.z * kernel_data0.z + image_data0.w * kernel_data0.w;
         value += image_data1.x * kernel_data1.x + image_data1.y * kernel_data1.y + image_data1.z * kernel_data1.z + image_data1.w * kernel_data1.w;
         value = warpReduceSum<32>(value);
         if (threadIdx.x == 0) {
-            value += kernel_bias[i];
+            value += Linear1_kernel_bias[i];
             value = value > 0 ? value : 0;
-            output_image[blockIdx.x * 120 + i] = value;
+            output_image_shared1[i] = value;
         }
     }
-}
 
-__global__ void Linear2_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
-    float2 image_data0 = ((float2 *)(input_image + blockIdx.x * 120 + threadIdx.x * 2))[0];
-    float image_data1 = ((float *)(input_image + blockIdx.x * 120 + threadIdx.x + 64))[0];
-    float image_data2 = 0;
-    if (threadIdx.x < 24) {
-        image_data2 = ((float *)(input_image + blockIdx.x * 120 + threadIdx.x + 96))[0];
-    }
     for (int i = 0; i < 84; i++) {
         float value = 0;
-        float2 kernel_data0 = ((float2 *)(kernel_weights + OFFSET(i, threadIdx.x * 2, 120)))[0];
-        float kernel_data1 = ((float *)(kernel_weights + OFFSET(i, threadIdx.x + 64, 120)))[0];
+        float2 kernel_data0 = ((float2 *)(Linear2_kernel_weights + OFFSET(i, threadIdx.x * 2, 120)))[0];
+        float kernel_data1 = ((float *)(Linear2_kernel_weights + OFFSET(i, threadIdx.x + 64, 120)))[0];
         float kernel_data2 = 0;
         if (threadIdx.x < 24) {
-            kernel_data2 = ((float *)(kernel_weights + OFFSET(i, threadIdx.x + 96, 120)))[0];
+            kernel_data2 = ((float *)(Linear2_kernel_weights + OFFSET(i, threadIdx.x + 96, 120)))[0];
         }
-        value += image_data0.x * kernel_data0.x + image_data0.y * kernel_data0.y + image_data1 * kernel_data1 + image_data2 * kernel_data2;
+        value += output_image_shared1[threadIdx.x * 2] * kernel_data0.x + output_image_shared1[threadIdx.x * 2 + 1] * kernel_data0.y + output_image_shared1[threadIdx.x + 64] * kernel_data1;
+        if (threadIdx.x < 24) {
+            value += output_image_shared1[threadIdx.x + 96] * kernel_data2;
+        }
         value = warpReduceSum<32>(value);
         if (threadIdx.x == 0) {
-            value += kernel_bias[i];
+            value += Linear2_kernel_bias[i];
             value = value > 0 ? value : 0;
-            output_image[blockIdx.x * 84 + i] = value;
+            output_image_shared2[i] = value;
         }
     }
-}
 
-__global__ void Linear3_ReLu(float *input_image, float *output_image, float *kernel_weights, float *kernel_bias) {
-    float2 image_data0 = ((float2 *)(input_image + blockIdx.x * 84 + threadIdx.x * 2))[0];
-    float image_data1 = 0;
-    if (threadIdx.x < 20) {
-        image_data1 = ((float *)(input_image + blockIdx.x * 84 + threadIdx.x + 64))[0];
-    }
     for (int i = 0; i < 10; i++) {
         float value = 0;
-        float2 kernel_data0 = ((float2 *)(kernel_weights + OFFSET(i, threadIdx.x * 2, 84)))[0];
+        float2 kernel_data0 = ((float2 *)(Linear3_kernel_weights + OFFSET(i, threadIdx.x * 2, 84)))[0];
         float kernel_data1 = 0;
         if (threadIdx.x < 20) {
-            kernel_data1 = ((float *)(kernel_weights + OFFSET(i, threadIdx.x + 64, 84)))[0];
+            kernel_data1 = ((float *)(Linear3_kernel_weights + OFFSET(i, threadIdx.x + 64, 84)))[0];
         }
-        value += image_data0.x * kernel_data0.x + image_data0.y * kernel_data0.y + image_data1 * kernel_data1;
+        value += output_image_shared2[threadIdx.x * 2] * kernel_data0.x + output_image_shared2[threadIdx.x * 2 + 1] * kernel_data0.y;
+        if (threadIdx.x < 20) {
+            value += output_image_shared2[threadIdx.x + 64] * kernel_data1;
+        }
         value = warpReduceSum<32>(value);
         if (threadIdx.x == 0) {
-            value += kernel_bias[i];
+            value += Linear3_kernel_bias[i];
             output_image[blockIdx.x * 10 + i] = value;
         }
     }
@@ -342,6 +360,7 @@ int main(int argc, char *argv[]) {
 
     // Conv1 [1, 28, 28] -> [6, 24, 24]
     const int batchsize = 10000;
+    const int stream_size = 625;
     const int Conv1_input_height = 28;
     const int Conv1_kernel_height = 5;
     const int Conv1_output_height = Conv1_input_height - Conv1_kernel_height + 1;
@@ -357,7 +376,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMalloc((void **)&device_Conv1_kernel_bias, Conv1_output_channel * sizeof(float)));
     CHECK(cudaMemcpy(device_Conv1_kernel_weight, &Conv1_weight[0], Conv1_output_channel * Conv1_input_channel * Conv1_kernel_height * Conv1_kernel_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Conv1_kernel_bias, &Conv1_bias[0], Conv1_output_channel * sizeof(float), cudaMemcpyHostToDevice));
-    dim3 Conv1_blocksperGrid(batchsize);
+    dim3 Conv1_blocksperGrid(stream_size);
     dim3 Conv1_threadsperBlock(32);
 
     // MaxPool1 [6, 24, 24] -> [6, 12, 12]
@@ -366,8 +385,6 @@ int main(int argc, char *argv[]) {
     const int MaxPool1_channel = Conv1_output_channel;
     float *device_MaxPool1_output_image;
     CHECK(cudaMalloc((void **)&device_MaxPool1_output_image, batchsize * MaxPool1_channel * MaxPool1_output_height * MaxPool1_output_height * sizeof(float)));
-    dim3 MaxPool1_blocksperGrid(batchsize);
-    dim3 MaxPool1_threadsperBlock(8, 8);
 
     // Conv2 [6, 12, 12] -> [16, 8, 8]
     const int Conv2_input_height = MaxPool1_output_height;
@@ -383,7 +400,7 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMalloc((void **)&device_Conv2_kernel_bias, Conv2_output_channel * sizeof(float)));
     CHECK(cudaMemcpy(device_Conv2_kernel_weight, &Conv2_weight[0], Conv2_output_channel * Conv2_input_channel * Conv2_kernel_height * Conv2_kernel_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Conv2_kernel_bias, &Conv2_bias[0], Conv2_output_channel * sizeof(float), cudaMemcpyHostToDevice));
-    dim3 Conv2_blocksperGrid(batchsize);
+    dim3 Conv2_blocksperGrid(stream_size);
     dim3 Conv2_threadsperBlock(32);
 
     // MaxPool2 [16, 8, 8] -> [16, 4, 4]
@@ -392,36 +409,28 @@ int main(int argc, char *argv[]) {
     const int MaxPool2_channel = Conv2_output_channel;
     float *device_MaxPool2_output_image;
     CHECK(cudaMalloc((void **)&device_MaxPool2_output_image, batchsize * MaxPool2_channel * MaxPool2_output_height * MaxPool2_output_height * sizeof(float)));
-    dim3 MaxPool2_blocksperGrid(batchsize);
-    dim3 MaxPool2_threadsperBlock(8, 8);
 
     // Linear1 [256] -> [120]
     const int Linear1_input_height = MaxPool2_channel * MaxPool2_output_height * MaxPool2_output_height;
     const int Linear1_output_height = 120;
-    float *device_Linear1_output_image;
     float *device_Linear1_kernel_weight;
     float *device_Linear1_kernel_bias;
-    CHECK(cudaMalloc((void **)&device_Linear1_output_image, batchsize * Linear1_output_height * sizeof(float)));
     CHECK(cudaMalloc((void **)&device_Linear1_kernel_weight, Linear1_output_height * Linear1_input_height * sizeof(float)));
     CHECK(cudaMalloc((void **)&device_Linear1_kernel_bias, Linear1_output_height * sizeof(float)));
     CHECK(cudaMemcpy(device_Linear1_kernel_weight, &Linear1_weight[0], Linear1_output_height * Linear1_input_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Linear1_kernel_bias, &Linear1_bias[0], Linear1_output_height * sizeof(float), cudaMemcpyHostToDevice));
-    dim3 Linear1_blocksperGrid(batchsize);
+    dim3 Linear1_blocksperGrid(stream_size);
     dim3 Linear1_threadsperBlock(32);
 
     // Linear2 [120] -> [84]
     const int Linear2_input_height = Linear1_output_height;
     const int Linear2_output_height = 84;
-    float *device_Linear2_output_image;
     float *device_Linear2_kernel_weight;
     float *device_Linear2_kernel_bias;
-    CHECK(cudaMalloc((void **)&device_Linear2_output_image, batchsize * Linear2_output_height * sizeof(float)));
     CHECK(cudaMalloc((void **)&device_Linear2_kernel_weight, Linear2_output_height * Linear2_input_height * sizeof(float)));
     CHECK(cudaMalloc((void **)&device_Linear2_kernel_bias, Linear2_output_height * sizeof(float)));
     CHECK(cudaMemcpy(device_Linear2_kernel_weight, &Linear2_weight[0], Linear2_output_height * Linear2_input_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Linear2_kernel_bias, &Linear2_bias[0], Linear2_output_height * sizeof(float), cudaMemcpyHostToDevice));
-    dim3 Linear2_blocksperGrid(batchsize);
-    dim3 Linear2_threadsperBlock(32);
 
     // Linear3 [84] -> [10]
     const int Linear3_input_height = Linear2_output_height;
@@ -436,29 +445,30 @@ int main(int argc, char *argv[]) {
     CHECK(cudaMemcpy(device_Linear3_kernel_weight, &Linear3_weight[0], Linear3_output_height * Linear3_input_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(device_Linear3_kernel_bias, &Linear3_bias[0], Linear3_output_height * sizeof(float), cudaMemcpyHostToDevice));
     CHECK(cudaMallocHost((void **)&host_Linear3_output_image, batchsize * Linear3_output_height * sizeof(float), cudaHostAllocDefault));
-    dim3 Linear3_blocksperGrid(batchsize);
-    dim3 Linear3_threadsperBlock(32);
+
+    const int nStreams = 6;
+    // Stream的初始化
+    cudaStream_t streams[nStreams];
+    for (int i = 0; i < nStreams; i++) {
+        cudaStreamCreate(&streams[i]);
+    }
 
     int correct_nums = 0;
     auto start = std::chrono::high_resolution_clock::now();
-
-    CHECK(cudaMemcpy(device_input_image, images, batchsize * Conv1_input_height * Conv1_input_height * sizeof(float), cudaMemcpyHostToDevice));
-    // Conv1
-    Conv1_ReLu<<<Conv1_blocksperGrid, Conv1_threadsperBlock>>>(device_input_image, device_Conv1_output_image, device_Conv1_kernel_weight, device_Conv1_kernel_bias);
-    // MaxPool1
-    MaxPool1<<<MaxPool1_blocksperGrid, MaxPool1_threadsperBlock>>>(device_Conv1_output_image, device_MaxPool1_output_image);
-    // Conv2
-    Conv2_ReLu<<<Conv2_blocksperGrid, Conv2_threadsperBlock>>>(device_MaxPool1_output_image, device_Conv2_output_image, device_Conv2_kernel_weight, device_Conv2_kernel_bias);
-    // MaxPool2
-    MaxPool2<<<MaxPool2_blocksperGrid, MaxPool2_threadsperBlock>>>(device_Conv2_output_image, device_MaxPool2_output_image);
-    // Linear1
-    Linear1_ReLu<<<Linear1_blocksperGrid, Linear1_threadsperBlock>>>(device_MaxPool2_output_image, device_Linear1_output_image, device_Linear1_kernel_weight, device_Linear1_kernel_bias);
-    // Linear2
-    Linear2_ReLu<<<Linear2_blocksperGrid, Linear2_threadsperBlock>>>(device_Linear1_output_image, device_Linear2_output_image, device_Linear2_kernel_weight, device_Linear2_kernel_bias);
-    // Linear3
-    Linear3_ReLu<<<Linear3_blocksperGrid, Linear3_threadsperBlock>>>(device_Linear2_output_image, device_Linear3_output_image, device_Linear3_kernel_weight, device_Linear3_kernel_bias);
-    CHECK(cudaMemcpy(host_Linear3_output_image, device_Linear3_output_image, batchsize * Linear3_output_height * sizeof(float), cudaMemcpyDeviceToHost));
-
+    for (int i = 0; i < batchsize / stream_size; i++) {
+        int stream_id = i % nStreams;
+        CHECK(cudaMemcpyAsync(device_input_image + i * stream_size * Conv1_input_height * Conv1_input_height, images + i * stream_size * Conv1_input_height * Conv1_input_height, stream_size * Conv1_input_height * Conv1_input_height * sizeof(float), cudaMemcpyHostToDevice, streams[stream_id]));
+        // Conv1 + MaxPool1
+        Conv1_ReLu<<<Conv1_blocksperGrid, Conv1_threadsperBlock, 0, streams[stream_id]>>>(device_input_image + i * stream_size * Conv1_input_height * Conv1_input_height, device_Conv1_output_image + i * stream_size * Conv1_output_channel * Conv1_output_height * Conv1_output_height, device_MaxPool1_output_image + i * stream_size * MaxPool1_channel * MaxPool1_output_height * MaxPool1_output_height, device_Conv1_kernel_weight, device_Conv1_kernel_bias);
+        // Conv2 + MaxPool2
+        Conv2_ReLu<<<Conv2_blocksperGrid, Conv2_threadsperBlock, 0, streams[stream_id]>>>(device_MaxPool1_output_image + i * stream_size * MaxPool1_channel * MaxPool1_output_height * MaxPool1_output_height, device_Conv2_output_image + i * stream_size * Conv2_output_channel * Conv2_output_height * Conv2_output_height, device_MaxPool2_output_image + i * stream_size * MaxPool2_channel * MaxPool2_output_height * MaxPool2_output_height, device_Conv2_kernel_weight, device_Conv2_kernel_bias);
+        // Linear1 + Linear2 + Linear3
+        Linear_ReLu<<<Linear1_blocksperGrid, Linear1_threadsperBlock, 0, streams[stream_id]>>>(device_MaxPool2_output_image + i * stream_size * MaxPool2_channel * MaxPool2_output_height * MaxPool2_output_height, device_Linear3_output_image + i * stream_size * Linear3_output_height, device_Linear1_kernel_weight, device_Linear1_kernel_bias, device_Linear2_kernel_weight, device_Linear2_kernel_bias, device_Linear3_kernel_weight, device_Linear3_kernel_bias);
+        CHECK(cudaMemcpyAsync(host_Linear3_output_image + i * stream_size * Linear3_output_height, device_Linear3_output_image + i * stream_size * Linear3_output_height, stream_size * Linear3_output_height * sizeof(float), cudaMemcpyDeviceToHost, streams[stream_id]));
+    }
+    for (int i = 0; i < nStreams; i++) {
+        cudaStreamSynchronize(streams[i]);
+    }
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end - start;
 
@@ -492,15 +502,19 @@ int main(int argc, char *argv[]) {
     // Linear1
     CHECK(cudaFree(device_Linear1_kernel_weight));
     CHECK(cudaFree(device_Linear1_kernel_bias));
-    CHECK(cudaFree(device_Linear1_output_image));
     // Linear2
     CHECK(cudaFree(device_Linear2_kernel_weight));
     CHECK(cudaFree(device_Linear2_kernel_bias));
-    CHECK(cudaFree(device_Linear2_output_image));
     // Linear3
     CHECK(cudaFree(device_Linear3_kernel_weight));
     CHECK(cudaFree(device_Linear3_kernel_bias));
     CHECK(cudaFree(device_Linear3_output_image));
-
+    // Host
+    CHECK(cudaFreeHost(images));
+    CHECK(cudaFreeHost(host_Linear3_output_image));
+    // Stream
+    for (int i = 0; i < nStreams; i++) {
+        cudaStreamDestroy(streams[i]);
+    }
     return 0;
 }
